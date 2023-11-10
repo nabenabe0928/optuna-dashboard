@@ -97,7 +97,9 @@ export const TrialTable: FC<{
   ) {
     studyDetail?.intersection_search_space.forEach((s) => {
       const sortable = s.distribution.type !== "CategoricalDistribution"
-      const filterable = s.distribution.type === "CategoricalDistribution"
+      const filterable = 
+        s.distribution.type !== "FloatDistribution" || 
+        ("step" in s.distribution && s.distribution.step === 0)
       columns.push({
         field: "params",
         label: `Param ${s.name}`,
