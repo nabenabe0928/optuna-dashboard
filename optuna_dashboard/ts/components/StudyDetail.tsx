@@ -157,8 +157,8 @@ export const StudyDetail: FC<{
             width: "auto",
             height: "auto",
             display: "flex",
-            justifyContent: "center",
-            alignItems: "center",
+            justifyContent: "left",
+            alignItems: "left",
           }}
         >
           <CardContent>
