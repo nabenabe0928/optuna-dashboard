@@ -10,6 +10,7 @@ from optuna.storages import RDBStorage
 from optuna.study import StudyDirection
 from optuna.study import StudySummary
 from optuna.trial import FrozenTrial
+from optuna.trial import TrialState
 from optuna.version import __version__ as optuna_ver
 from packaging import version
 
@@ -24,27 +25,48 @@ trials_cache: dict[int, list[FrozenTrial]] = {}
 trials_last_fetched_at: dict[int, datetime] = {}
 
 
+def _should_update_trials_cache(storage: BaseStorage, study_id: int) -> bool:
+    trials = trials_cache.get(study_id, None)
+    if trials is None or len(trials) == 0:
+        return True
+
+    # TODO(nabenabe0928): Check any edge cases.
+    # 1. If some trials are still running or waiting?
+    # 2. If some trial_id after max_trial_id is missing?
+    updatable_states = [TrialState.RUNNING, TrialState.WAITING]
+    if any(t.state in updatable_states for t in trials):
+        first_updatable_id = min(t._trial_id for t in trials if t.state in updatable_states)
+        first_updatable_trial = storage.get_trial(trial_id=first_updatable_id)
+        return first_updatable_trial.state not in updatable_states
+
+    max_trial_id = max(t._trial_id for t in trials)
+    try:
+        # If another trial that did not exist is found in the database, nothing will be raised.
+        storage.get_trial(trial_id=max_trial_id + 1)
+        return True
+    except KeyError:
+        return False
+
+
+def _should_use_cache_to_avoid_race_condition(study_id: int) -> bool:
+    trials = trials_cache.get(study_id, None)
+    last_fetched_at = trials_last_fetched_at.get(study_id, None)
+    if trials is None or last_fetched_at is None:
+        return False
+
+    # Not a big fan of the heuristic, but I can't think of anything better.
+    ttl_seconds = (min(len(trials), 800) + 200) // 100
+    return datetime.now() - last_fetched_at < timedelta(seconds=ttl_seconds)
+
+
 def get_trials(storage: BaseStorage, study_id: int) -> list[FrozenTrial]:
     with trials_cache_lock:
-        trials = trials_cache.get(study_id, None)
-
-        # Not a big fan of the heuristic, but I can't think of anything better.
-        if trials is None or len(trials) < 100:
-            ttl_seconds = 2
-        elif len(trials) < 500:
-            ttl_seconds = 5
-        else:
-            ttl_seconds = 10
-
-        last_fetched_at = trials_last_fetched_at.get(study_id, None)
-        if (
-            trials is not None
-            and last_fetched_at is not None
-            and datetime.now() - last_fetched_at < timedelta(seconds=ttl_seconds)
-        ):
+        if not _should_update_trials_cache(storage, study_id):
+            trials = trials_cache.get(study_id, None)
+            assert trials is not None, "mypy redefinition"
             return trials
-    trials = storage.get_all_trials(study_id, deepcopy=False)
 
+    trials = storage.get_all_trials(study_id, deepcopy=False)
     if (
         # See https://github.com/optuna/optuna/pull/3702
         version.parse(optuna_ver) <= version.Version("3.0.0rc0.dev")
@@ -56,6 +78,7 @@ def get_trials(storage: BaseStorage, study_id: int) -> list[FrozenTrial]:
     with trials_cache_lock:
         trials_last_fetched_at[study_id] = datetime.now()
         trials_cache[study_id] = trials
+
     return trials
 
 
