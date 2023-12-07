@@ -25,7 +25,11 @@ trials_cache: dict[int, list[FrozenTrial]] = {}
 trials_last_fetched_at: dict[int, datetime] = {}
 
 
-def _should_update_trials_cache(storage: BaseStorage, trials: list[FrozenTrial]) -> bool:
+def _should_update_trials_cache(storage: BaseStorage, study_id: int) -> bool:
+    trials = trials_cache.get(study_id, None)
+    if trials is None or len(trials) == 0:
+        return True
+
     # TODO(nabenabe0928): Check any edge cases.
     # 1. If some trials are still running or waiting?
     # 2. If some trial_id after max_trial_id is missing?
@@ -34,9 +38,6 @@ def _should_update_trials_cache(storage: BaseStorage, trials: list[FrozenTrial])
         first_updatable_id = min(t._trial_id for t in trials if t.state in updatable_states)
         first_updatable_trial = storage.get_trial(trial_id=first_updatable_id)
         return first_updatable_trial.state not in updatable_states
-
-    if len(trials) == 0:
-        return True
 
     max_trial_ids = max(t._trial_id for t in trials)
     try:
@@ -47,16 +48,25 @@ def _should_update_trials_cache(storage: BaseStorage, trials: list[FrozenTrial])
         return False
 
 
-def _should_use_cache_to_avoid_race_condition(last_fetched_at: datetime, n_trials: int) -> bool:
+def _should_use_cache_to_avoid_race_condition(study_id: int) -> bool:
+    trials = trials_cache.get(study_id, None)
+    last_fetched_at = trials_last_fetched_at.get(study_id, None)
+    if trials is None or last_fetched_at is None:
+        return False
+
     # Not a big fan of the heuristic, but I can't think of anything better.
-    ttl_seconds = min(max(200, n_trials), 1000) // 100
+    ttl_seconds = (min(len(trials), 800) + 200) // 100
     return datetime.now() - last_fetched_at < timedelta(seconds=ttl_seconds)
 
 
 def get_trials(storage: BaseStorage, study_id: int) -> list[FrozenTrial]:
     with trials_cache_lock:
-        trials = trials_cache.get(study_id, None)
-        if trials is not None and not _should_update_trials_cache(storage, trials):
+        if (
+            _should_use_cache_to_avoid_race_condition(study_id)
+            or not _should_update_trials_cache(storage, study_id)
+        ):
+            trials = trials_cache.get(study_id, None)
+            assert trials is not None, "mypy redefinition"
             return trials
 
     trials = storage.get_all_trials(study_id, deepcopy=False)
