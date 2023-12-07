@@ -39,10 +39,10 @@ def _should_update_trials_cache(storage: BaseStorage, study_id: int) -> bool:
         first_updatable_trial = storage.get_trial(trial_id=first_updatable_id)
         return first_updatable_trial.state not in updatable_states
 
-    max_trial_ids = max(t._trial_id for t in trials)
+    max_trial_id = max(t._trial_id for t in trials)
     try:
         # If another trial that did not exist is found in the database, nothing will be raised.
-        storage.get_trial(trial_id=max_trial_ids + 1)
+        storage.get_trial(trial_id=max_trial_id + 1)
         return True
     except KeyError:
         return False
@@ -61,10 +61,11 @@ def _should_use_cache_to_avoid_race_condition(study_id: int) -> bool:
 
 def get_trials(storage: BaseStorage, study_id: int) -> list[FrozenTrial]:
     with trials_cache_lock:
-        if (
-            _should_use_cache_to_avoid_race_condition(study_id)
-            or not _should_update_trials_cache(storage, study_id)
-        ):
+        # if _should_use_cache_to_avoid_race_condition(study_id)
+        # or not _should_update_trials_cache(
+        #     storage, study_id
+        # ):
+        if _should_use_cache_to_avoid_race_condition(study_id):
             trials = trials_cache.get(study_id, None)
             assert trials is not None, "mypy redefinition"
             return trials
