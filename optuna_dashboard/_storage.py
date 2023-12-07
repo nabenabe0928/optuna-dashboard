@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime
+from datetime import timedelta
 import threading
 import typing
 
@@ -20,6 +22,7 @@ if typing.TYPE_CHECKING:
 # In-memory trials cache
 trials_cache_lock = threading.Lock()
 trials_cache: dict[int, list[FrozenTrial]] = {}
+trials_last_fetched_at: dict[int, datetime] = {}
 
 
 def _should_update_trials_cache(storage: BaseStorage, trials: list[FrozenTrial]) -> bool:
@@ -44,6 +47,12 @@ def _should_update_trials_cache(storage: BaseStorage, trials: list[FrozenTrial])
         return False
 
 
+def _should_use_cache_to_avoid_race_condition(last_fetched_at: datetime, n_trials: int) -> bool:
+    # Not a big fan of the heuristic, but I can't think of anything better.
+    ttl_seconds = min(max(200, n_trials), 1000) // 100
+    return datetime.now() - last_fetched_at < timedelta(seconds=ttl_seconds)
+
+
 def get_trials(storage: BaseStorage, study_id: int) -> list[FrozenTrial]:
     with trials_cache_lock:
         trials = trials_cache.get(study_id, None)
@@ -60,6 +69,7 @@ def get_trials(storage: BaseStorage, study_id: int) -> list[FrozenTrial]:
         trials = sorted(trials, key=lambda t: t.number)
 
     with trials_cache_lock:
+        trials_last_fetched_at[study_id] = datetime.now()
         trials_cache[study_id] = trials
 
     return trials
