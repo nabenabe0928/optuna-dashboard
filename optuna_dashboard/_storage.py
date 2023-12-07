@@ -47,7 +47,7 @@ def _should_update_trials_cache(storage: BaseStorage, trials: list[FrozenTrial])
 def get_trials(storage: BaseStorage, study_id: int) -> list[FrozenTrial]:
     with trials_cache_lock:
         trials = trials_cache.get(study_id, None)
-        if trials is not None and _should_update_trials_cache(storage, trials):
+        if trials is not None and not _should_update_trials_cache(storage, trials):
             return trials
 
     trials = storage.get_all_trials(study_id, deepcopy=False)
