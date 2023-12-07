@@ -61,9 +61,7 @@ def _should_use_cache_to_avoid_race_condition(study_id: int) -> bool:
 
 def get_trials(storage: BaseStorage, study_id: int) -> list[FrozenTrial]:
     with trials_cache_lock:
-        if _should_use_cache_to_avoid_race_condition(study_id) or not _should_update_trials_cache(
-            storage, study_id
-        ):
+        if not _should_update_trials_cache(storage, study_id):
             trials = trials_cache.get(study_id, None)
             assert trials is not None, "mypy redefinition"
             return trials
